@@ -158,8 +158,8 @@ MIT License - zobacz [LICENSE](LICENSE) dla szczegółów.
 
 ## 👥 Autorzy
 
-- **Twoje Imię Nazwisko** - *Michał Król* - [GitHub](https://github.com/m1szk4)
-- **Promotor** - *Dr. Inż Tomasz Bartczak*
+-  *Michał Król* - [GitHub](https://github.com/m1szk4)
+-  *Dr. Inż Tomasz Bartczak*
 
 ## 🙏 Podziękowania
 
