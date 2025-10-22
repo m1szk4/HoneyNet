@@ -1,0 +1,80 @@
+{
+  "dashboard": {
+    "title": "IoT Honeynet - Overview",
+    "uid": "honeynet-overview",
+    "version": 1,
+    "panels": [
+      {
+        "id": 1,
+        "title": "Total Events (24h)",
+        "type": "stat",
+        "targets": [
+          {
+            "datasource": "ClickHouse",
+            "rawSql": "SELECT count() FROM honeynet.events WHERE timestamp >= now() - INTERVAL 1 DAY"
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "title": "Unique Source IPs (24h)",
+        "type": "stat",
+        "targets": [
+          {
+            "datasource": "ClickHouse",
+            "rawSql": "SELECT uniq(source_ip_anon) FROM honeynet.events WHERE timestamp >= now() - INTERVAL 1 DAY"
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "title": "Events Over Time",
+        "type": "timeseries",
+        "targets": [
+          {
+            "datasource": "ClickHouse",
+            "rawSql": "SELECT toStartOfHour(timestamp) AS time, count() AS count FROM honeynet.events WHERE timestamp >= now() - INTERVAL 7 DAY GROUP BY time ORDER BY time"
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "title": "Top 10 Countries",
+        "type": "bargauge",
+        "targets": [
+          {
+            "datasource": "ClickHouse",
+            "rawSql": "SELECT country_code, count() AS attacks FROM honeynet.events WHERE timestamp >= now() - INTERVAL 7 DAY AND country_code != '' GROUP BY country_code ORDER BY attacks DESC LIMIT 10"
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "title": "Attacks by Protocol",
+        "type": "piechart",
+        "targets": [
+          {
+            "datasource": "ClickHouse",
+            "rawSql": "SELECT protocol, count() FROM honeynet.events WHERE timestamp >= now() - INTERVAL 1 DAY GROUP BY protocol"
+          }
+        ]
+      },
+      {
+        "id": 6,
+        "title": "MITRE ATT&CK Heatmap",
+        "type": "heatmap",
+        "targets": [
+          {
+            "datasource": "ClickHouse",
+            "rawSql": "SELECT attack_tactic, attack_technique, count() FROM honeynet.events WHERE timestamp >= now() - INTERVAL 7 DAY AND attack_technique != '' GROUP BY attack_tactic, attack_technique"
+          }
+        ]
+      }
+    ],
+    "refresh": "30s",
+    "time": {
+      "from": "now-7d",
+      "to": "now"
+    }
+  }
+}

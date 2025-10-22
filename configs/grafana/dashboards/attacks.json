@@ -1,0 +1,58 @@
+{
+  "dashboard": {
+    "title": "IoT Honeynet - Attack Analysis",
+    "uid": "honeynet-attacks",
+    "version": 1,
+    "panels": [
+      {
+        "id": 1,
+        "title": "Brute Force Attempts",
+        "type": "timeseries",
+        "targets": [
+          {
+            "datasource": "ClickHouse",
+            "rawSql": "SELECT toStartOfHour(timestamp) AS time, count() FROM honeynet.events WHERE is_bruteforce = 1 AND timestamp >= now() - INTERVAL 7 DAY GROUP BY time ORDER BY time"
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "title": "Top Usernames Attempted",
+        "type": "table",
+        "targets": [
+          {
+            "datasource": "ClickHouse",
+            "rawSql": "SELECT username, count() AS attempts FROM honeynet.ssh_events WHERE event_type = 'login' AND timestamp >= now() - INTERVAL 7 DAY GROUP BY username ORDER BY attempts DESC LIMIT 20"
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "title": "Exploit Attempts by Type",
+        "type": "bargauge",
+        "targets": [
+          {
+            "datasource": "ClickHouse",
+            "rawSql": "SELECT attack_technique, count() FROM honeynet.events WHERE is_exploit = 1 AND timestamp >= now() - INTERVAL 7 DAY GROUP BY attack_technique ORDER BY count() DESC LIMIT 10"
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "title": "Downloaded Malware Files",
+        "type": "table",
+        "targets": [
+          {
+            "datasource": "ClickHouse",
+            "rawSql": "SELECT timestamp, file_hash, file_type, country_code FROM honeynet.downloaded_files WHERE timestamp >= now() - INTERVAL 7 DAY ORDER BY timestamp DESC LIMIT 50"
+          }
+        ]
+      }
+    ],
+    "refresh": "1m",
+    "time": {
+      "from": "now-7d",
+      "to": "now"
+    }
+  }
+}

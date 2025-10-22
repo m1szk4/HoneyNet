@@ -1,0 +1,407 @@
+%YAML 1.1
+---
+
+# Suricata configuration for IoT Honeynet
+# Optimized for high packet rate and low false positives
+
+vars:
+  address-groups:
+    HOME_NET: "[172.20.0.0/24]"
+    EXTERNAL_NET: "!$HOME_NET"
+    
+  port-groups:
+    HTTP_PORTS: "80"
+    SHELLCODE_PORTS: "!80"
+    SSH_PORTS: "22"
+    TELNET_PORTS: "23,2323"
+
+# Network interface
+af-packet:
+  - interface: eth0
+    cluster-id: 99
+    cluster-type: cluster_flow
+    defrag: yes
+    use-mmap: yes
+    ring-size: 4096      # Increased for high traffic
+    buffer-size: 32768   # Increased for high traffic
+    threads: 4           # Parallel processing
+
+# Packet capture settings
+pcap:
+  - interface: eth0
+  
+# Packet acquisition
+default-packet-size: 1514
+
+max-pending-packets: 8192
+
+# Threading
+threading:
+  set-cpu-affinity: no
+  cpu-affinity:
+    - management-cpu-set:
+        cpu: [ 0 ]
+    - receive-cpu-set:
+        cpu: [ 0,1 ]
+    - worker-cpu-set:
+        cpu: [ 1,2,3 ]
+  detect-thread-ratio: 1.5
+
+# Outputs
+outputs:
+  # EVE JSON log (primary output)
+  - eve-log:
+      enabled: yes
+      filetype: regular
+      filename: /var/log/suricata/eve.json
+      community-id: true
+      types:
+        - alert:
+            metadata: yes
+            tagged-packets: yes
+            payload: yes
+            payload-buffer-size: 4kb
+            payload-printable: yes
+            packet: yes
+            http-body: yes
+            http-body-printable: yes
+        - http:
+            extended: yes
+        - dns:
+            enabled: yes
+        - tls:
+            enabled: yes
+            extended: yes
+        - files:
+            enabled: yes
+        - ssh:
+            enabled: yes
+        - flow:
+            enabled: no  # Disabled to reduce log volume
+        - stats:
+            enabled: yes
+            interval: 60s
+
+  # Fast log (simple alert format)
+  - fast:
+      enabled: yes
+      filename: /var/log/suricata/fast.log
+      append: yes
+
+  # Unified2 (disabled)
+  - unified2-alert:
+      enabled: no
+
+  # HTTP log (disabled, using EVE instead)
+  - http-log:
+      enabled: no
+
+# Logging
+logging:
+  default-log-level: info
+  outputs:
+    - console:
+        enabled: yes
+    - file:
+        enabled: yes
+        level: info
+        filename: /var/log/suricata/suricata.log
+    - syslog:
+        enabled: no
+
+# Rule files
+default-rule-path: /etc/suricata/rules
+rule-files:
+  - emerging-threats.rules
+  - iot-botnet.rules
+  - local.rules
+
+# Classification config
+classification-file: /etc/suricata/classification.config
+reference-config-file: /etc/suricata/reference.config
+
+# Performance tuning
+detect:
+  profile: high
+  custom-values:
+    toclient-groups: 3
+    toserver-groups: 25
+  sgh-mpm-context: auto
+  inspection-recursion-limit: 3000
+
+# Stream engine
+stream:
+  memcap: 64mb
+  checksum-validation: no  # Disabled for honeypot (saves CPU)
+  inline: no
+  reassembly:
+    memcap: 256mb
+    depth: 1mb
+    toserver-chunk-size: 2560
+    toclient-chunk-size: 2560
+    randomize-chunk-size: yes
+
+# Host table
+host:
+  hash-size: 4096
+  prealloc: 1000
+  memcap: 32mb
+
+# Flow settings
+flow:
+  memcap: 128mb
+  hash-size: 65536
+  prealloc: 10000
+  emergency-recovery: 30
+
+# Defrag settings
+defrag:
+  memcap: 32mb
+  hash-size: 65536
+  trackers: 65535
+  max-frags: 65535
+  prealloc: yes
+  timeout: 60
+
+# Application layer parsers
+app-layer:
+  protocols:
+    http:
+      enabled: yes
+      memcap: 64mb
+    ssh:
+      enabled: yes
+    tls:
+      enabled: yes
+    dns:
+      enabled: yes
+    ftp:
+      enabled: yes
+    smb:
+      enabled: yes
+      
+# Stats
+stats:
+  enabled: yes
+  interval: 60
+
+# PCAP log (full packet capture for suspicious traffic)
+pcap-log:
+  enabled: no
+  filename: /var/log/suricata/capture_%n_%t.pcap
+  limit: 1000mb
+  max-files: 10
+  mode: multi
+  use-stream-depth: no
+  honor-pass-rules: no
+
+# Capture filters (none - honeypot captures everything)
+capture:
+
+# GeoIP (disabled, enrichment done in Logstash)
+geoip-database: /usr/share/GeoIP/GeoLite2-Country.mmdb
+
+# Reputation (disabled)
+reputation-categories-file: /etc/suricata/reputation/categories.txt
+default-reputation-path: /etc/suricata/reputation/
+reputation-files:
+```
+
+---
+
+### **8. `configs/suricata/rules/iot-botnet.rules`**
+```
+# =====================================================
+# IoT Botnet Detection Rules
+# Custom Suricata rules for IoT honeypot
+# Author: Michał Król
+# Version: 1.0
+# =====================================================
+
+# =====================================================
+# MIRAI BOTNET DETECTION
+# =====================================================
+
+# Mirai - Default Credentials Brute Force (Telnet)
+alert tcp $EXTERNAL_NET any -> $HOME_NET 23 (msg:"IoT Botnet Mirai - Telnet Default Credentials root/xc3511"; \
+    flow:to_server,established; \
+    content:"root"; depth:10; nocase; \
+    content:"xc3511"; distance:0; within:50; nocase; \
+    metadata:mitre_technique_id T1078.001, malware_family Mirai; \
+    classtype:trojan-activity; \
+    sid:5000001; rev:2;)
+
+alert tcp $EXTERNAL_NET any -> $HOME_NET 23 (msg:"IoT Botnet Mirai - Telnet Default Credentials admin/admin"; \
+    flow:to_server,established; \
+    content:"admin"; depth:10; nocase; \
+    content:"admin"; distance:0; within:50; nocase; \
+    metadata:mitre_technique_id T1078.001, malware_family Mirai; \
+    classtype:trojan-activity; \
+    sid:5000002; rev:1;)
+
+alert tcp $EXTERNAL_NET any -> $HOME_NET [23,2323] (msg:"IoT Botnet Mirai - Rapid Telnet Scanning Pattern"; \
+    flags:S; \
+    threshold:type both, track by_src, count 10, seconds 60; \
+    metadata:mitre_technique_id T1595.001, malware_family Mirai; \
+    classtype:attempted-recon; \
+    sid:5000003; rev:1;)
+
+# Mirai - Known C&C Communication Pattern
+alert tcp $HOME_NET any -> $EXTERNAL_NET any (msg:"IoT Botnet Mirai - Outbound C&C Communication Attempt"; \
+    flow:to_server,established; \
+    content:"|00 00|"; depth:2; \
+    content:"Mirai"; distance:0; \
+    metadata:mitre_technique_id T1071.001, malware_family Mirai; \
+    classtype:trojan-activity; \
+    sid:5000004; rev:1;)
+
+# Mirai - Download Script Pattern
+alert tcp $EXTERNAL_NET any -> $HOME_NET any (msg:"IoT Botnet Mirai - Malware Download Command"; \
+    flow:to_server,established; \
+    content:"wget http"; nocase; \
+    pcre:"/wget\s+http:\/\/[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/i"; \
+    metadata:mitre_technique_id T1105, malware_family Mirai; \
+    classtype:trojan-activity; \
+    sid:5000005; rev:1;)
+
+# =====================================================
+# SSH BRUTE FORCE DETECTION
+# =====================================================
+
+alert tcp $EXTERNAL_NET any -> $HOME_NET 22 (msg:"IoT Attack - SSH Brute Force Attempt Detected"; \
+    flow:to_server,established; \
+    detection_filter:track by_src, count 20, seconds 60; \
+    metadata:mitre_technique_id T1110.001; \
+    classtype:attempted-user; \
+    sid:5000010; rev:1;)
+
+alert tcp $EXTERNAL_NET any -> $HOME_NET 22 (msg:"IoT Attack - SSH Login with Common IoT Credentials"; \
+    flow:to_server,established; \
+    content:"root"; nocase; \
+    pcre:"/(admin|password|123456|default|root|xc3511)/i"; \
+    metadata:mitre_technique_id T1078.001; \
+    classtype:attempted-user; \
+    sid:5000011; rev:1;)
+
+# =====================================================
+# HTTP EXPLOITS
+# =====================================================
+
+# ShellShock CGI Exploit
+alert tcp $EXTERNAL_NET any -> $HOME_NET $HTTP_PORTS (msg:"IoT Exploit - ShellShock CGI Attempt"; \
+    flow:to_server,established; \
+    content:"() {"; http_header; \
+    pcre:"/\(\)\s*\{.*;\s*\}/"; \
+    metadata:mitre_technique_id T1190, cve CVE-2014-6271; \
+    classtype:web-application-attack; \
+    sid:5000020; rev:2;)
+
+# Directory Traversal
+alert tcp $EXTERNAL_NET any -> $HOME_NET $HTTP_PORTS (msg:"IoT Exploit - Directory Traversal Attempt"; \
+    flow:to_server,established; \
+    content:"../"; http_uri; \
+    pcre:"/(\.\.(\/|%2f))+/i"; \
+    metadata:mitre_technique_id T1083; \
+    classtype:web-application-attack; \
+    sid:5000021; rev:1;)
+
+# Command Injection in HTTP
+alert tcp $EXTERNAL_NET any -> $HOME_NET $HTTP_PORTS (msg:"IoT Exploit - HTTP Command Injection"; \
+    flow:to_server,established; \
+    content:"|3b|"; http_uri; \
+    pcre:"/(;|\||`|&|\$\()/"; \
+    metadata:mitre_technique_id T1059.004; \
+    classtype:web-application-attack; \
+    sid:5000022; rev:1;)
+
+# CGI Vulnerability Scan
+alert tcp $EXTERNAL_NET any -> $HOME_NET $HTTP_PORTS (msg:"IoT Recon - CGI Directory Scan"; \
+    flow:to_server,established; \
+    content:"/cgi-bin/"; http_uri; nocase; \
+    threshold:type both, track by_src, count 5, seconds 30; \
+    metadata:mitre_technique_id T1595.002; \
+    classtype:web-application-attack; \
+    sid:5000023; rev:1;)
+
+# =====================================================
+# RTSP CAMERA EXPLOITS
+# =====================================================
+
+alert tcp $EXTERNAL_NET any -> $HOME_NET 554 (msg:"IoT Exploit - RTSP Buffer Overflow Attempt"; \
+    flow:to_server,established; \
+    content:"DESCRIBE"; depth:20; \
+    isdataat:1024,relative; \
+    metadata:mitre_technique_id T1190; \
+    classtype:attempted-user; \
+    sid:5000030; rev:1;)
+
+alert tcp $EXTERNAL_NET any -> $HOME_NET 554 (msg:"IoT Attack - RTSP Brute Force Authentication"; \
+    flow:to_server,established; \
+    content:"Authorization:"; http_header; \
+    detection_filter:track by_src, count 10, seconds 60; \
+    metadata:mitre_technique_id T1110.001; \
+    classtype:attempted-user; \
+    sid:5000031; rev:1;)
+
+# =====================================================
+# UPnP ABUSE
+# =====================================================
+
+alert udp $EXTERNAL_NET any -> $HOME_NET 1900 (msg:"IoT Attack - UPnP SSDP Amplification Attempt"; \
+    content:"M-SEARCH"; depth:20; \
+    content:"ST:"; distance:0; \
+    threshold:type both, track by_src, count 10, seconds 10; \
+    metadata:mitre_technique_id T1498.002; \
+    classtype:attempted-dos; \
+    sid:5000040; rev:1;)
+
+# =====================================================
+# SMB EXPLOITS
+# =====================================================
+
+alert tcp $EXTERNAL_NET any -> $HOME_NET 445 (msg:"IoT Exploit - SMB EternalBlue Scan"; \
+    flow:to_server,established; \
+    content:"|ff|SMB"; depth:5; \
+    content:"|00 00 00 00|"; distance:0; \
+    metadata:mitre_technique_id T1210, cve CVE-2017-0144; \
+    classtype:attempted-user; \
+    sid:5000050; rev:1;)
+
+# =====================================================
+# MODBUS ICS ATTACKS
+# =====================================================
+
+alert tcp $EXTERNAL_NET any -> $HOME_NET 502 (msg:"IoT ICS - Modbus Unauthorized Read"; \
+    flow:to_server,established; \
+    content:"|00 01|"; depth:2; offset:0; \
+    metadata:mitre_technique_id T0868; \
+    classtype:attempted-recon; \
+    sid:5000060; rev:1;)
+
+alert tcp $EXTERNAL_NET any -> $HOME_NET 502 (msg:"IoT ICS - Modbus Write Command"; \
+    flow:to_server,established; \
+    content:"|00 05|"; depth:2; offset:6; \
+    metadata:mitre_technique_id T0836; \
+    classtype:attempted-admin; \
+    sid:5000061; rev:1;)
+
+# =====================================================
+# GENERIC IOT PATTERNS
+# =====================================================
+
+# Mass Port Scan
+alert tcp $EXTERNAL_NET any -> $HOME_NET any (msg:"IoT Recon - Rapid Port Scan"; \
+    flags:S; \
+    threshold:type both, track by_src, count 20, seconds 10; \
+    metadata:mitre_technique_id T1046; \
+    classtype:attempted-recon; \
+    sid:5000100; rev:1;)
+
+# Known Botnet User-Agents
+alert tcp $EXTERNAL_NET any -> $HOME_NET $HTTP_PORTS (msg:"IoT Botnet - Suspicious User-Agent"; \
+    flow:to_server,established; \
+    content:"User-Agent:"; http_header; \
+    pcre:"/User-Agent:\s*(Hello, World|Mozila|() { :;)|python-requests)/i"; \
+    metadata:mitre_technique_id T1071.001; \
+    classtype:trojan-activity; \
+    sid:5000101; rev:1;)

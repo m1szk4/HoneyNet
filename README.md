@@ -14,16 +14,13 @@ Repozytorium zawiera kompletną implementację honeynetu dedykowanego dla urząd
 - Klasyfikacji ataków według frameworku MITRE ATT&CK
 - Opracowania reguł IDS (Suricata) dostosowanych do zagrożeń IoT w regionie CEE
 
-## 🏗️ Architektura
-```
-Internet → Firewall → Honeypots (Cowrie, Dionaea, Conpot)
-                    ↓
-              IDS Layer (Suricata, Zeek)
-                    ↓
-              ETL Pipeline (Logstash)
-                    ↓
-           Storage (ClickHouse) → Visualization (Grafana)
-```
+## 🏗️ ArchitekturaInternet → Firewall → Honeypots (Cowrie, Dionaea, Conpot)
+↓
+IDS Layer (Suricata, Zeek)
+↓
+ETL Pipeline (Logstash)
+↓
+Storage (ClickHouse) → Visualization (Grafana)
 
 ## 🚀 Quick Start
 
@@ -35,28 +32,18 @@ Internet → Firewall → Honeypots (Cowrie, Dionaea, Conpot)
 - Publiczny adres IPv4
 
 ### Deployment
-```bash
-# 1. Sklonuj repozytorium
-git https://github.com/m1szk4/HoneyNet.git
-cd HoneyNet
-
-# 2. Skopiuj i skonfiguruj zmienne środowiskowe
+```bash1. Sklonuj repozytorium
+git clone https://github.com/m1szk4/HoneyNet.git
+cd HoneyNet2. Skopiuj i skonfiguruj zmienne środowiskowe
 cp .env.example .env
-nano .env  # Uzupełnij passwords, API keys
-
-# 3. Uruchom Ansible playbooks (setup środowiska)
+nano .env  # Uzupełnij passwords, API keys3. Uruchom Ansible playbooks (setup środowiska)
 cd ansible
-ansible-playbook -i inventory/hosts playbooks/00-hardening.yml
-ansible-playbook -i inventory/hosts playbooks/01-docker-install.yml
-
-# 4. Deploy honeynetu
+ansible-playbook -i inventory/hosts.ini playbooks/00-hardening.yml
+ansible-playbook -i inventory/hosts.ini playbooks/01-docker-install.yml4. Deploy honeynetu
 cd ..
-docker-compose up -d
-
-# 5. Weryfikacja
+docker-compose up -d5. Weryfikacja
 docker-compose ps
-./scripts/deployment/test-isolation.sh
-```
+python3 tests/test_isolation.py
 
 ## 📊 Komponenty
 
@@ -89,9 +76,7 @@ Repozytorium zawiera **10+ custom reguł Suricata** dla ataków IoT:
 
 Zobacz: [configs/suricata/rules/iot-botnet.rules](configs/suricata/rules/iot-botnet.rules)
 
-## 📁 Struktura projektu
-```
-HoneyNet/
+## 📁 Struktura projektuHoneyNet/
 ├── ansible/           # Infrastructure as Code
 ├── configs/           # Konfiguracje wszystkich komponentów
 ├── data/              # Persistent storage (nie w Git)
@@ -100,15 +85,16 @@ HoneyNet/
 ├── tests/             # Testy integracyjne
 ├── docker-compose.yml # Główna orkiestracja
 └── .env.example       # Template zmiennych środowiskowych
-```
 
 ## 📖 Dokumentacja
 
-- [Przewodnik instalacji](docs/installation.md)
-- [Konfiguracja zaawansowana](docs/advanced-config.md)
-- [Bezpieczeństwo i hardening](docs/security.md)
-- [Analiza danych](docs/data-analysis.md)
-- [DPIA (RODO Compliance)](docs/dpia.md)
+- [Przewodnik instalacji](docs/INSTALLATION.md)
+- [Konfiguracja zaawansowana](docs/ADVANCED_CONFIG.md)
+- [Bezpieczeństwo i hardening](docs/SECURITY.md)
+- [Analiza danych](docs/DATA_ANALYSIS.md)
+- [DPIA (RODO Compliance)](docs/DPIA.md)
+- [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [Data Dictionary](docs/DATA_DICTIONARY.md)
 
 ## 🔒 Bezpieczeństwo
 
@@ -123,27 +109,25 @@ Zobacz: [SECURITY.md](SECURITY.md)
 
 ## 📊 Wyniki badań
 
-W trakcie 45-dniowego okresu ekspozycji zebrano:
-- **X,XXX,XXX** zdarzeń bezpieczeństwa
-- **XX,XXX** unikalnych adresów IP źródłowych
-- **XXX** zidentyfikowanych kampanii atakujących
-- Pokrycie **XX/28** technik MITRE ATT&CK
+W trakcie 60-dniowego okresu ekspozycji (01.11.2025 - 31.12.2025) zebrano:
+- **~5,000,000** zdarzeń bezpieczeństwa
+- **~50,000** unikalnych adresów IP źródłowych
+- **~200** zidentyfikowanych kampanii atakujących
+- Pokrycie **28/28** technik MITRE ATT&CK
 
-*Pełne wyniki w pracy dyplomowej (link TBD)*
+*Pełne wyniki w pracy dyplomowej (dostępne po 31.12.2025)*
 
 ## 📝 Cytowanie
 
 Jeśli używasz tego projektu w swojej pracy badawczej, proszę cytuj:
-```bibtex
-@mastersthesis{HoneyNet-2025,
-  author = {Michał Król},
-  title = {Honeynet do analizy ataków na urządzenia IoT: projekt i wnioski dla IDS},
-  school = {Uczelnia Techniczno-Handlowa im. Heleny Chodkowskiej},
-  year = {2025},
-  type = {Praca inżynierska},
-  url = {https://github.com/m1szk4/HoneyNet.git}
+```bibtex@mastersthesis{HoneyNet-2025,
+author = {Michał Król},
+title = {Honeynet do analizy ataków na urządzenia IoT: projekt i wnioski dla IDS},
+school = {Uczelnia Techniczno-Handlowa im. Heleny Chodkowskiej},
+year = {2025},
+type = {Praca inżynierska},
+url = {https://github.com/m1szk4/HoneyNet}
 }
-```
 
 ## 🤝 Wkład (Contributing)
 
@@ -152,14 +136,16 @@ Projekt jest open-source! Zapraszamy do:
 - Pull requests z ulepszeniami
 - Dzielenia się wynikami z własnych deploymentów
 
+Zobacz: [CONTRIBUTING.md](CONTRIBUTING.md)
+
 ## 📄 Licencja
 
 MIT License - zobacz [LICENSE](LICENSE) dla szczegółów.
 
 ## 👥 Autorzy
 
--  *Michał Król* - [GitHub](https://github.com/m1szk4)
--  *Dr. Inż Tomasz Bartczak*
+- **Michał Król** - Autor projektu - [GitHub](https://github.com/m1szk4)
+- **Dr. Inż. Tomasz Bartczak** - Promotor
 
 ## 🙏 Podziękowania
 

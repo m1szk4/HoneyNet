@@ -1,0 +1,30 @@
+# Logstash Pipelines Configuration
+# Multiple pipelines for different honeypot sources
+
+- pipeline.id: cowrie
+  path.config: "/usr/share/logstash/pipeline/cowrie.conf"
+  pipeline.workers: 2
+  pipeline.batch.size: 250
+  queue.type: persisted
+  queue.max_bytes: 512mb
+
+- pipeline.id: dionaea
+  path.config: "/usr/share/logstash/pipeline/dionaea.conf"
+  pipeline.workers: 2
+  pipeline.batch.size: 250
+  queue.type: persisted
+  queue.max_bytes: 512mb
+
+- pipeline.id: suricata
+  path.config: "/usr/share/logstash/pipeline/suricata.conf"
+  pipeline.workers: 3
+  pipeline.batch.size: 500
+  queue.type: persisted
+  queue.max_bytes: 1gb
+
+- pipeline.id: zeek
+  path.config: "/usr/share/logstash/pipeline/zeek.conf"
+  pipeline.workers: 3
+  pipeline.batch.size: 500
+  queue.type: persisted
+  queue.max_bytes: 1gb

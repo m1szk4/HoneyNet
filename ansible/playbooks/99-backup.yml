@@ -1,0 +1,58 @@
+---
+- name: Backup Honeynet Configuration and Data
+  hosts: honeynet
+  become: yes
+  
+  vars:
+    honeynet_dir: /opt/iot-honeynet
+    backup_dir: /opt/iot-honeynet/backups
+    backup_date: "{{ ansible_date_time.date }}"
+  
+  tasks:
+    - name: Create backup directory
+      file:
+        path: "{{ backup_dir }}"
+        state: directory
+        mode: '0755'
+    
+    - name: Backup configurations
+      archive:
+        path: "{{ honeynet_dir }}/configs"
+        dest: "{{ backup_dir }}/configs-{{ backup_date }}.tar.gz"
+        format: gz
+    
+    - name: Backup docker-compose.yml
+      copy:
+        src: "{{ honeynet_dir }}/docker-compose.yml"
+        dest: "{{ backup_dir }}/docker-compose-{{ backup_date }}.yml"
+        remote_src: yes
+    
+    - name: Backup .env (encrypted)
+      shell: |
+        tar czf - {{ honeynet_dir }}/.env | \
+        openssl enc -aes-256-cbc -salt -pbkdf2 -out {{ backup_dir }}/env-{{ backup_date }}.tar.gz.enc -k "{{ lookup('env', 'BACKUP_PASSWORD') }}"
+      no_log: true
+    
+    - name: Export ClickHouse data (last 7 days)
+      shell: |
+        docker exec clickhouse clickhouse-client --query="
+        SELECT * FROM honeynet.events 
+        WHERE timestamp >= now() - INTERVAL 7 DAY 
+        FORMAT Parquet" > {{ backup_dir }}/events-{{ backup_date }}.parquet
+    
+    - name: Clean old backups (keep 30 days)
+      find:
+        paths: "{{ backup_dir }}"
+        age: 30d
+        recurse: no
+      register: old_backups
+    
+    - name: Remove old backups
+      file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ old_backups.files }}"
+    
+    - name: Display backup info
+      debug:
+        msg: "Backup completed: {{ backup_dir }}/configs-{{ backup_date }}.tar.gz"

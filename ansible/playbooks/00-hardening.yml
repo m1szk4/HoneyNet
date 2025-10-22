@@ -1,0 +1,270 @@
+---
+- name: System Hardening for IoT Honeynet
+  hosts: honeynet
+  become: yes
+  
+  vars:
+    ssh_port: 22
+    allowed_ssh_ips: "{{ management_ip }}"
+  
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      
+    - name: Upgrade all packages
+      apt:
+        upgrade: dist
+        autoremove: yes
+        autoclean: yes
+    
+    - name: Install security packages
+      apt:
+        name:
+          - ufw
+          - fail2ban
+          - unattended-upgrades
+          - auditd
+          - aide
+          - rkhunter
+          - lynis
+        state: present
+    
+    # ==========================================
+    # SSH HARDENING
+    # ==========================================
+    
+    - name: Disable root login via SSH
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^PermitRootLogin'
+        line: 'PermitRootLogin prohibit-password'
+        state: present
+      notify: restart sshd
+    
+    - name: Disable password authentication
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^PasswordAuthentication'
+        line: 'PasswordAuthentication no'
+        state: present
+      notify: restart sshd
+    
+    - name: Disable X11 forwarding
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^X11Forwarding'
+        line: 'X11Forwarding no'
+        state: present
+      notify: restart sshd
+    
+    - name: Set SSH MaxAuthTries
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^MaxAuthTries'
+        line: 'MaxAuthTries 3'
+        state: present
+      notify: restart sshd
+    
+    # ==========================================
+    # FIREWALL (UFW)
+    # ==========================================
+    
+    - name: Configure UFW defaults
+      ufw:
+        direction: "{{ item.direction }}"
+        policy: "{{ item.policy }}"
+      loop:
+        - { direction: 'incoming', policy: 'deny' }
+        - { direction: 'outgoing', policy: 'allow' }
+    
+    - name: Allow SSH from management IP only
+      ufw:
+        rule: allow
+        port: "{{ ssh_port }}"
+        proto: tcp
+        from_ip: "{{ allowed_ssh_ips }}"
+        comment: "SSH from management"
+    
+    - name: Allow honeypot ports (from anywhere)
+      ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: tcp
+        comment: "Honeypot port"
+      loop:
+        - 22      # SSH honeypot
+        - 23      # Telnet
+        - 80      # HTTP
+        - 443     # HTTPS
+        - 445     # SMB
+        - 502     # Modbus
+        - 2323    # Alternate Telnet
+        - 3000    # Grafana
+        - 3306    # MySQL honeypot
+    
+    - name: Allow UDP ports
+      ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: udp
+        comment: "Honeypot UDP"
+      loop:
+        - 161     # SNMP
+        - 1900    # UPnP
+        - 47808   # BACnet
+    
+    - name: Enable UFW
+      ufw:
+        state: enabled
+        logging: 'on'
+    
+    # ==========================================
+    # FAIL2BAN
+    # ==========================================
+    
+    - name: Configure fail2ban for SSH
+      copy:
+        dest: /etc/fail2ban/jail.local
+        content: |
+          [DEFAULT]
+          bantime = 3600
+          findtime = 600
+          maxretry = 3
+          
+          [sshd]
+          enabled = true
+          port = {{ ssh_port }}
+          logpath = /var/log/auth.log
+          maxretry = 3
+          bantime = 7200
+      notify: restart fail2ban
+    
+    - name: Start and enable fail2ban
+      systemd:
+        name: fail2ban
+        state: started
+        enabled: yes
+    
+    # ==========================================
+    # AUDITD (System Auditing)
+    # ==========================================
+    
+    - name: Configure auditd rules
+      copy:
+        dest: /etc/audit/rules.d/honeynet.rules
+        content: |
+          # Monitor critical system files
+          -w /etc/passwd -p wa -k passwd_changes
+          -w /etc/shadow -p wa -k shadow_changes
+          -w /etc/sudoers -p wa -k sudoers_changes
+          -w /etc/group -p wa -k group_changes
+          
+          # Monitor firewall changes
+          -w /sbin/iptables -p x -k firewall_changes
+          -w /usr/sbin/ufw -p x -k firewall_changes
+          
+          # Monitor Docker
+          -w /usr/bin/docker -p x -k docker_exec
+          -w /var/lib/docker -p wa -k docker_changes
+          
+          # Monitor network configuration
+          -w /etc/network/ -p wa -k network_changes
+      notify: restart auditd
+    
+    - name: Start and enable auditd
+      systemd:
+        name: auditd
+        state: started
+        enabled: yes
+    
+    # ==========================================
+    # AIDE (File Integrity Monitoring)
+    # ==========================================
+    
+    - name: Initialize AIDE database
+      command: aideinit
+      args:
+        creates: /var/lib/aide/aide.db
+    
+    - name: Move AIDE database to correct location
+      command: mv /var/lib/aide/aide.db.new /var/lib/aide/aide.db
+      args:
+        creates: /var/lib/aide/aide.db
+        removes: /var/lib/aide/aide.db.new
+    
+    - name: Schedule AIDE checks (daily at 2 AM)
+      cron:
+        name: "AIDE integrity check"
+        minute: "0"
+        hour: "2"
+        job: "/usr/bin/aide --check | mail -s 'AIDE Report' root"
+    
+    # ==========================================
+    # AUTOMATIC SECURITY UPDATES
+    # ==========================================
+    
+    - name: Configure unattended-upgrades
+      copy:
+        dest: /etc/apt/apt.conf.d/50unattended-upgrades
+        content: |
+          Unattended-Upgrade::Allowed-Origins {
+              "${distro_id}:${distro_codename}-security";
+          };
+          Unattended-Upgrade::AutoFixInterruptedDpkg "true";
+          Unattended-Upgrade::Remove-Unused-Dependencies "true";
+          Unattended-Upgrade::Automatic-Reboot "false";
+    
+    - name: Enable automatic updates
+      copy:
+        dest: /etc/apt/apt.conf.d/20auto-upgrades
+        content: |
+          APT::Periodic::Update-Package-Lists "1";
+          APT::Periodic::Unattended-Upgrade "1";
+          APT::Periodic::AutocleanInterval "7";
+    
+    # ==========================================
+    # SYSTEM TUNING
+    # ==========================================
+    
+    - name: Disable unused services
+      systemd:
+        name: "{{ item }}"
+        state: stopped
+        enabled: no
+      loop:
+        - avahi-daemon
+        - cups
+        - bluetooth
+      ignore_errors: yes
+    
+    - name: Set secure sysctl parameters
+      sysctl:
+        name: "{{ item.key }}"
+        value: "{{ item.value }}"
+        state: present
+        reload: yes
+      loop:
+        - { key: 'net.ipv4.conf.all.accept_redirects', value: '0' }
+        - { key: 'net.ipv4.conf.all.send_redirects', value: '0' }
+        - { key: 'net.ipv4.conf.all.accept_source_route', value: '0' }
+        - { key: 'net.ipv4.icmp_echo_ignore_broadcasts', value: '1' }
+        - { key: 'net.ipv4.tcp_syncookies', value: '1' }
+        - { key: 'kernel.dmesg_restrict', value: '1' }
+  
+  handlers:
+    - name: restart sshd
+      systemd:
+        name: sshd
+        state: restarted
+    
+    - name: restart fail2ban
+      systemd:
+        name: fail2ban
+        state: restarted
+    
+    - name: restart auditd
+      systemd:
+        name: auditd
+        state: restarted

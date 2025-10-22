@@ -1,0 +1,83 @@
+---
+- name: Deploy IoT Honeynet
+  hosts: honeynet
+  become: yes
+  
+  vars:
+    honeynet_dir: /opt/iot-honeynet
+  
+  tasks:
+    - name: Create honeynet directory
+      file:
+        path: "{{ honeynet_dir }}"
+        state: directory
+        mode: '0755'
+    
+    - name: Create subdirectories
+      file:
+        path: "{{ honeynet_dir }}/{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - configs
+        - data
+        - scripts
+        - logs
+        - backups
+    
+    - name: Copy docker-compose.yml
+      copy:
+        src: ../../docker-compose.yml
+        dest: "{{ honeynet_dir }}/docker-compose.yml"
+        mode: '0644'
+    
+    - name: Copy .env file
+      copy:
+        src: ../../.env
+        dest: "{{ honeynet_dir }}/.env"
+        mode: '0600'
+    
+    - name: Copy all configs
+      synchronize:
+        src: ../../configs/
+        dest: "{{ honeynet_dir }}/configs/"
+        recursive: yes
+    
+    - name: Copy all scripts
+      synchronize:
+        src: ../../scripts/
+        dest: "{{ honeynet_dir }}/scripts/"
+        recursive: yes
+    
+    - name: Make scripts executable
+      file:
+        path: "{{ honeynet_dir }}/scripts"
+        mode: '0755'
+        recurse: yes
+    
+    - name: Pull Docker images
+      command: docker-compose pull
+      args:
+        chdir: "{{ honeynet_dir }}"
+    
+    - name: Start honeynet
+      command: docker-compose up -d
+      args:
+        chdir: "{{ honeynet_dir }}"
+    
+    - name: Wait for containers to start
+      pause:
+        seconds: 30
+    
+    - name: Check container status
+      command: docker-compose ps
+      args:
+        chdir: "{{ honeynet_dir }}"
+      register: container_status
+    
+    - name: Display container status
+      debug:
+        msg: "{{ container_status.stdout_lines }}"
+    
+    - name: Record production start date
+      shell: date > {{ honeynet_dir }}/PRODUCTION_START_DATE
