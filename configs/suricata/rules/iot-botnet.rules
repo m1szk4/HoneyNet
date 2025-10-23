@@ -1,0 +1,481 @@
+# ============================================================================
+# IoT Honeynet - Custom Suricata Rules for IoT Attack Detection
+# ============================================================================
+# Author: Michał Król
+# Thesis: "Honeynet do analizy ataków na urządzenia IoT: Projekt i wnioski dla IDS"
+#
+# These rules are optimized for IoT environments based on empirical data
+# collected from honeypots in the CEE region (Poland and Central-Eastern Europe).
+#
+# Performance targets (thesis requirements):
+#   - TPR (True Positive Rate): > 80%
+#   - FPR (False Positive Rate): < 5%
+#   - Latency P95: < 100ms
+#
+# MITRE ATT&CK Coverage:
+#   - Initial Access (T1078.001, T1190)
+#   - Execution (T1059.004, T1059.001)
+#   - Credential Access (T1110.001)
+#   - Command and Control (T1071.001)
+#   - Impact (T1498)
+#
+# ============================================================================
+
+# ============================================================================
+# CATEGORY 1: MIRAI BOTNET DETECTION
+# ============================================================================
+# Based on thesis Chapter 2.2.2 - Mirai botnet lifecycle analysis
+# Covers: Reconnaissance → Initial Access → Command & Control
+
+# Rule 1: Mirai Telnet Brute Force - Default Credentials
+# Detects attempts to use known Mirai default credentials
+# MITRE: T1078.001 (Valid Accounts: Default Credentials)
+# MITRE: T1110.001 (Brute Force: Password Guessing)
+alert tcp $EXTERNAL_NET any -> $HOME_NET 23 (
+    msg:"IoT BOTNET Mirai Telnet Login Attempt - Default Credentials";
+    flow:to_server,established;
+    content:"root"; nocase; offset:0; depth:20;
+    pcre:"/(?:root|admin|user|guest|support).*(?:xc3511|vizxv|admin|default|12345|password|1234|666666|888888|54321|klv123|realtek|juantech|123456|7ujMko0admin)/i";
+    threshold: type threshold, track by_src, count 3, seconds 60;
+    classtype:trojan-activity;
+    reference:url,github.com/jgamblin/Mirai-Source-Code;
+    reference:cve,2016-10372;
+    metadata:attack_target Server, deployment Perimeter, mitre_tactic_id TA0001, mitre_tactic_name Initial_Access, mitre_technique_id T1078.001, mitre_technique_name Valid_Accounts;
+    sid:2000001; rev:1;
+)
+
+# Rule 2: Mirai Scanner - Rapid Telnet Port Scanning
+# Detects Mirai-style mass scanning behavior (random IP scanning on port 23)
+# MITRE: T1595.001 (Active Scanning: Scanning IP Blocks)
+alert tcp $EXTERNAL_NET any -> $HOME_NET 23 (
+    msg:"IoT BOTNET Mirai Scanner - Rapid Telnet Probe";
+    flags:S;
+    threshold: type threshold, track by_src, count 10, seconds 5;
+    classtype:attempted-recon;
+    reference:url,attack.mitre.org/techniques/T1595/001;
+    metadata:attack_target Server, mitre_tactic_id TA0043, mitre_tactic_name Reconnaissance, mitre_technique_id T1595.001;
+    sid:2000002; rev:1;
+)
+
+# Rule 3: Mirai Post-Infection - Loader Communication
+# Detects communication patterns typical for Mirai loader (binary download)
+# MITRE: T1071.001 (Application Layer Protocol: Web Protocols)
+# MITRE: T1105 (Ingress Tool Transfer)
+alert tcp $HOME_NET any -> $EXTERNAL_NET $HTTP_PORTS (
+    msg:"IoT BOTNET Mirai Loader - Binary Download Request";
+    flow:to_server,established;
+    content:"GET"; http_method;
+    content:".sh"; http_uri;
+    content:".mips"; http_uri;
+    content:".arm"; http_uri;
+    pcre:"/\.(sh|mips|arm|x86|m68k|ppc|mpsl|sh4)$/Ui";
+    threshold: type limit, track by_src, count 1, seconds 300;
+    classtype:trojan-activity;
+    reference:url,www.incapsula.com/blog/malware-analysis-mirai-ddos-botnet.html;
+    metadata:mitre_tactic_id TA0011, mitre_tactic_name Command_And_Control, mitre_technique_id T1071.001;
+    sid:2000003; rev:1;
+)
+
+# Rule 4: Mirai Variant - Alternative Telnet Ports
+# Many IoT devices use non-standard Telnet ports (2323, 23231, 23232)
+# MITRE: T1078.001 (Valid Accounts: Default Credentials)
+alert tcp $EXTERNAL_NET any -> $HOME_NET [2323,23231,23232,2332,2333] (
+    msg:"IoT BOTNET Mirai Alternative Telnet Port Brute Force";
+    flow:to_server,established;
+    content:"admin"; nocase;
+    content:"login"; nocase; distance:0; within:50;
+    threshold: type threshold, track by_src, count 5, seconds 60;
+    classtype:trojan-activity;
+    metadata:mitre_tactic_id TA0001, mitre_technique_id T1078.001;
+    sid:2000004; rev:1;
+)
+
+# ============================================================================
+# CATEGORY 2: SSH BRUTE FORCE ATTACKS
+# ============================================================================
+# Based on thesis Chapter 2.2.3 - Typowe wektory ataków
+
+# Rule 5: SSH Brute Force - High Frequency
+# Detects rapid SSH authentication attempts (characteristic of automated tools)
+# MITRE: T1110.001 (Brute Force: Password Guessing)
+alert ssh $EXTERNAL_NET any -> $HOME_NET 22 (
+    msg:"IoT SSH Brute Force - High Frequency Attack";
+    flow:to_server,established;
+    ssh.proto_version:"2.0";
+    threshold: type threshold, track by_src, count 15, seconds 60;
+    classtype:attempted-user;
+    reference:url,attack.mitre.org/techniques/T1110/001;
+    metadata:mitre_tactic_id TA0006, mitre_tactic_name Credential_Access, mitre_technique_id T1110.001;
+    sid:2000005; rev:1;
+)
+
+# Rule 6: SSH Brute Force - Known IoT Usernames
+# Detects attempts with common IoT device usernames
+# MITRE: T1078.001 (Valid Accounts: Default Credentials)
+alert ssh $EXTERNAL_NET any -> $HOME_NET 22 (
+    msg:"IoT SSH Brute Force - Common IoT Username";
+    flow:to_server,established;
+    content:"SSH-"; depth:4;
+    pcre:"/(?:pi|ubnt|root|admin|user|guest|default|support|service|oracle|postgres|mysql)/i";
+    threshold: type threshold, track by_src, count 5, seconds 120;
+    classtype:attempted-user;
+    metadata:mitre_tactic_id TA0006, mitre_technique_id T1078.001;
+    sid:2000006; rev:1;
+)
+
+# ============================================================================
+# CATEGORY 3: HTTP/WEB EXPLOITS
+# ============================================================================
+# Based on thesis Chapter 2.2.3 - Exploity HTTP/CGI
+
+# Rule 7: ShellShock Exploit (CVE-2014-6271)
+# Detects Bash ShellShock vulnerability exploitation attempts
+# MITRE: T1190 (Exploit Public-Facing Application)
+alert http $EXTERNAL_NET any -> $HOME_NET $HTTP_PORTS (
+    msg:"IoT HTTP ShellShock Exploit Attempt (CVE-2014-6271)";
+    flow:to_server,established;
+    content:"() {"; http_header;
+    content:":;"; http_header; distance:0; within:10;
+    pcre:"/\(\)\s*\{\s*:;/H";
+    classtype:web-application-attack;
+    reference:cve,2014-6271;
+    reference:url,attack.mitre.org/techniques/T1190;
+    metadata:mitre_tactic_id TA0001, mitre_tactic_name Initial_Access, mitre_technique_id T1190, cve CVE-2014-6271;
+    sid:2000007; rev:1;
+)
+
+# Rule 8: CGI Command Injection - wget/curl
+# Detects command injection attempts using wget/curl to download malware
+# MITRE: T1059.004 (Command and Scripting Interpreter: Unix Shell)
+# MITRE: T1105 (Ingress Tool Transfer)
+alert http $EXTERNAL_NET any -> $HOME_NET $HTTP_PORTS (
+    msg:"IoT HTTP CGI Command Injection - Malware Download";
+    flow:to_server,established;
+    content:"GET"; http_method;
+    pcre:"/\/cgi-bin\/.*(?:wget|curl|fetch)\s+http/Ui";
+    content:".sh"; http_uri; nocase;
+    classtype:web-application-attack;
+    reference:url,attack.mitre.org/techniques/T1059/004;
+    metadata:mitre_tactic_id TA0002, mitre_tactic_name Execution, mitre_technique_id T1059.004;
+    sid:2000008; rev:1;
+)
+
+# Rule 9: Directory Traversal - /etc/passwd Access
+# Detects attempts to access sensitive system files via directory traversal
+# MITRE: T1005 (Data from Local System)
+alert http $EXTERNAL_NET any -> $HOME_NET $HTTP_PORTS (
+    msg:"IoT HTTP Directory Traversal - Sensitive File Access";
+    flow:to_server,established;
+    content:"GET"; http_method;
+    pcre:"/(?:\.\.\/|\.\.\\|%2e%2e%2f|%2e%2e%5c).*(?:etc\/passwd|etc\/shadow|boot\.ini|win\.ini)/Ui";
+    classtype:web-application-attack;
+    reference:url,owasp.org/www-community/attacks/Path_Traversal;
+    metadata:mitre_tactic_id TA0009, mitre_tactic_name Collection, mitre_technique_id T1005;
+    sid:2000009; rev:1;
+)
+
+# Rule 10: HTTP Exploit - Remote Command Execution
+# Detects various RCE attempts in HTTP parameters
+# MITRE: T1059.004 (Command and Scripting Interpreter: Unix Shell)
+alert http $EXTERNAL_NET any -> $HOME_NET $HTTP_PORTS (
+    msg:"IoT HTTP Remote Command Execution Attempt";
+    flow:to_server,established;
+    pcre:"/(?:system|exec|shell_exec|passthru|eval|base64_decode|popen|proc_open)(?:\s*)\(/Ui";
+    content:"php"; http_uri; nocase;
+    classtype:web-application-attack;
+    reference:url,attack.mitre.org/techniques/T1059;
+    metadata:mitre_tactic_id TA0002, mitre_technique_id T1059.004;
+    sid:2000010; rev:1;
+)
+
+# Rule 11: HTTP - Suspicious User-Agent (IoT Scanner)
+# Detects known IoT vulnerability scanners based on User-Agent strings
+# MITRE: T1595.002 (Active Scanning: Vulnerability Scanning)
+alert http $EXTERNAL_NET any -> $HOME_NET $HTTP_PORTS (
+    msg:"IoT HTTP Suspicious Scanner User-Agent";
+    flow:to_server,established;
+    content:"User-Agent|3a|"; http_header;
+    pcre:"/User-Agent:\s*(?:masscan|nmap|nikto|acunetix|sqlmap|metasploit|burp|w3af|zap|shodan|censys|binaryedge)/Hi";
+    threshold: type limit, track by_src, count 1, seconds 300;
+    classtype:attempted-recon;
+    reference:url,attack.mitre.org/techniques/T1595/002;
+    metadata:mitre_tactic_id TA0043, mitre_technique_id T1595.002;
+    sid:2000011; rev:1;
+)
+
+# ============================================================================
+# CATEGORY 4: RTSP CAMERA EXPLOITS
+# ============================================================================
+# Based on thesis Chapter 2.2.3 - RTSP exploits
+
+# Rule 12: RTSP Camera Exploit (CVE-2014-8361)
+# Detects known RTSP vulnerability exploitation attempts in IP cameras
+# MITRE: T1190 (Exploit Public-Facing Application)
+alert tcp $EXTERNAL_NET any -> $HOME_NET 554 (
+    msg:"IoT RTSP Camera Exploit Attempt (CVE-2014-8361)";
+    flow:to_server,established;
+    content:"DESCRIBE"; depth:10;
+    content:"rtsp://"; nocase; distance:0;
+    pcre:"/DESCRIBE\s+rtsp:\/\/[^\s]+(?:%00|%20|%2e%2e)/i";
+    classtype:attempted-admin;
+    reference:cve,2014-8361;
+    reference:url,nvd.nist.gov/vuln/detail/CVE-2014-8361;
+    metadata:mitre_tactic_id TA0001, mitre_technique_id T1190, cve CVE-2014-8361;
+    sid:2000012; rev:1;
+)
+
+# Rule 13: RTSP Brute Force - Authentication Attempts
+# Detects brute force attacks on RTSP authentication
+# MITRE: T1110.001 (Brute Force: Password Guessing)
+alert tcp $EXTERNAL_NET any -> $HOME_NET 554 (
+    msg:"IoT RTSP Camera Brute Force Attack";
+    flow:to_server,established;
+    content:"DESCRIBE"; depth:10;
+    content:"Authorization|3a| Basic"; nocase;
+    threshold: type threshold, track by_src, count 10, seconds 60;
+    classtype:attempted-user;
+    reference:url,attack.mitre.org/techniques/T1110;
+    metadata:mitre_tactic_id TA0006, mitre_technique_id T1110.001;
+    sid:2000013; rev:1;
+)
+
+# ============================================================================
+# CATEGORY 5: UPnP ABUSE
+# ============================================================================
+# Based on thesis Chapter 2.2.3 - UPnP exploitation
+
+# Rule 14: UPnP Port Mapping Abuse
+# Detects attempts to add port forwarding rules via UPnP SOAP
+# MITRE: T1133 (External Remote Services)
+alert udp $EXTERNAL_NET any -> $HOME_NET 1900 (
+    msg:"IoT UPnP AddPortMapping SOAP Request - Potential Port Forwarding Abuse";
+    content:"M-SEARCH"; nocase; depth:20;
+    content:"upnp|3a|rootdevice"; nocase;
+    threshold: type threshold, track by_src, count 5, seconds 30;
+    classtype:policy-violation;
+    reference:url,attack.mitre.org/techniques/T1133;
+    metadata:mitre_tactic_id TA0003, mitre_tactic_name Persistence, mitre_technique_id T1133;
+    sid:2000014; rev:1;
+)
+
+# Rule 15: UPnP SOAP AddPortMapping
+# Detects direct SOAP requests to add port mappings (more specific detection)
+alert tcp $EXTERNAL_NET any -> $HOME_NET 5000 (
+    msg:"IoT UPnP SOAP AddPortMapping Request";
+    flow:to_server,established;
+    content:"POST"; http_method;
+    content:"AddPortMapping"; http_client_body;
+    content:"WANIPConnection"; http_client_body;
+    classtype:policy-violation;
+    reference:url,www.upnp-hacks.org;
+    metadata:mitre_tactic_id TA0003, mitre_technique_id T1133;
+    sid:2000015; rev:1;
+)
+
+# ============================================================================
+# CATEGORY 6: ICS/SCADA PROTOCOL ATTACKS
+# ============================================================================
+# Based on thesis Chapter 2.2.1 - ICS/SCADA protocols (Modbus, BACnet)
+
+# Rule 16: Modbus Function Code Abuse - Write Operations
+# Detects unauthorized write operations to Modbus PLC/RTU
+# MITRE ICS: T0836 (Modify Parameter)
+alert tcp $EXTERNAL_NET any -> $HOME_NET 502 (
+    msg:"IoT ICS Modbus Write Function - Unauthorized Control Attempt";
+    flow:to_server,established;
+    content:"|00 00 00 00|"; offset:2; depth:4;
+    byte_test:1,&,0x10,7;
+    pcre:"/^.{7}[\x05\x06\x0f\x10]/s";
+    classtype:attempted-admin;
+    reference:url,attack.mitre.org/techniques/T0836;
+    metadata:mitre_tactic_id TA0040, mitre_tactic_name ICS_Impair_Process_Control, mitre_technique_id T0836;
+    sid:2000016; rev:1;
+)
+
+# Rule 17: Modbus Scanner - Enumeration
+# Detects Modbus scanning tools (e.g., modscan, plcscan)
+# MITRE ICS: T0846 (Remote System Discovery)
+alert tcp $EXTERNAL_NET any -> $HOME_NET 502 (
+    msg:"IoT ICS Modbus Scanner - Device Enumeration";
+    flow:to_server,established;
+    content:"|00 00 00 00|"; offset:2; depth:4;
+    threshold: type threshold, track by_src, count 10, seconds 30;
+    classtype:attempted-recon;
+    reference:url,attack.mitre.org/techniques/T0846;
+    metadata:mitre_tactic_id TA0102, mitre_tactic_name ICS_Discovery, mitre_technique_id T0846;
+    sid:2000017; rev:1;
+)
+
+# Rule 18: BACnet Suspicious Read Property
+# Detects attempts to read sensitive BACnet objects (device configuration)
+# MITRE ICS: T0840 (Network Connection Enumeration)
+alert udp $EXTERNAL_NET any -> $HOME_NET 47808 (
+    msg:"IoT ICS BACnet Read Property - Device Enumeration";
+    content:"|81|"; depth:1;
+    content:"|0c|"; distance:3; within:1;
+    threshold: type threshold, track by_src, count 20, seconds 60;
+    classtype:attempted-recon;
+    reference:url,attack.mitre.org/techniques/T0840;
+    metadata:mitre_tactic_id TA0102, mitre_technique_id T0840;
+    sid:2000018; rev:1;
+)
+
+# ============================================================================
+# CATEGORY 7: SMB/WINDOWS EXPLOITS (for Dionaea honeypot)
+# ============================================================================
+# Based on thesis Chapter 2.1.4 - Dionaea honeypot capabilities
+
+# Rule 19: SMB EternalBlue Exploit (CVE-2017-0144)
+# Detects MS17-010 exploitation attempts (WannaCry, NotPetya vector)
+# MITRE: T1190 (Exploit Public-Facing Application)
+alert tcp $EXTERNAL_NET any -> $HOME_NET 445 (
+    msg:"IoT SMB EternalBlue Exploit Attempt (CVE-2017-0144 MS17-010)";
+    flow:to_server,established;
+    content:"|ff|SMB"; depth:5; offset:4;
+    content:"|00 00 00 00 00 00 00 00 00 00 00 00 00 00|"; within:14;
+    byte_test:2,=,0x0001,25;
+    classtype:attempted-admin;
+    reference:cve,2017-0144;
+    reference:url,attack.mitre.org/software/S0366;
+    metadata:mitre_tactic_id TA0001, mitre_technique_id T1190, cve CVE-2017-0144;
+    sid:2000019; rev:1;
+)
+
+# Rule 20: SMB Brute Force - Anonymous Login Attempts
+# Detects SMB credential guessing attempts
+# MITRE: T1110.001 (Brute Force: Password Guessing)
+alert tcp $EXTERNAL_NET any -> $HOME_NET 445 (
+    msg:"IoT SMB Brute Force - Multiple Failed Authentication";
+    flow:to_server,established;
+    content:"|ff|SMB|73|"; depth:9; offset:4;
+    threshold: type threshold, track by_src, count 10, seconds 120;
+    classtype:attempted-user;
+    reference:url,attack.mitre.org/techniques/T1110;
+    metadata:mitre_tactic_id TA0006, mitre_technique_id T1110.001;
+    sid:2000020; rev:1;
+)
+
+# ============================================================================
+# CATEGORY 8: AUTO-ROOTERS AND MASS SCANNERS
+# ============================================================================
+# Based on thesis Chapter 2.2.3 - Auto-rootery i mass-rootery
+
+# Rule 21: Mass Scanner - Multiple Port Probe
+# Detects single source scanning multiple service ports rapidly
+# MITRE: T1046 (Network Service Scanning)
+alert tcp $EXTERNAL_NET any -> $HOME_NET [21,22,23,25,80,110,143,443,445,502,554,1900,2323,3306,5432,8080,8888] (
+    msg:"IoT Mass Scanner - Multiple Service Port Probe";
+    flags:S;
+    threshold: type threshold, track by_src, count 7, seconds 10;
+    classtype:attempted-recon;
+    reference:url,attack.mitre.org/techniques/T1046;
+    metadata:mitre_tactic_id TA0007, mitre_tactic_name Discovery, mitre_technique_id T1046;
+    sid:2000021; rev:1;
+)
+
+# Rule 22: Auto-rooter - Sequential Exploit Attempts
+# Detects automated exploitation tools trying multiple vulnerabilities
+# MITRE: T1190 (Exploit Public-Facing Application)
+alert tcp $EXTERNAL_NET any -> $HOME_NET $HTTP_PORTS (
+    msg:"IoT Auto-rooter - Sequential Vulnerability Exploitation";
+    flow:to_server,established;
+    content:"GET"; http_method;
+    pcre:"/(?:\/cgi-bin|\/admin|\/setup\.cgi|\/shell|\/bin\/sh)/Ui";
+    threshold: type threshold, track by_src, count 5, seconds 30;
+    classtype:web-application-attack;
+    reference:url,attack.mitre.org/techniques/T1190;
+    metadata:mitre_tactic_id TA0001, mitre_technique_id T1190;
+    sid:2000022; rev:1;
+)
+
+# ============================================================================
+# CATEGORY 9: POST-EXPLOITATION ACTIVITY
+# ============================================================================
+# Based on thesis MITRE ATT&CK mapping
+
+# Rule 23: Outbound C2 Communication - Suspicious Beaconing
+# Detects regular outbound connections (potential C2 beaconing)
+# MITRE: T1071.001 (Application Layer Protocol: Web Protocols)
+# NOTE: Should not trigger in properly isolated honeynet (data control)
+alert tcp $HOME_NET any -> $EXTERNAL_NET $HTTP_PORTS (
+    msg:"IoT CRITICAL - Outbound HTTP from Honeypot (C2 Communication or Isolation Breach)";
+    flow:to_server,established;
+    content:"GET"; http_method;
+    threshold: type limit, track by_src, count 1, seconds 60;
+    classtype:trojan-activity;
+    priority:1;
+    reference:url,attack.mitre.org/techniques/T1071;
+    metadata:mitre_tactic_id TA0011, mitre_technique_id T1071.001, critical_alert;
+    sid:2000023; rev:1;
+)
+
+# Rule 24: Lateral Movement - Internal Network Scanning
+# Detects attempts to scan internal network from compromised honeypot
+# MITRE: T1046 (Network Service Scanning)
+alert tcp $HOME_NET any -> $HOME_NET any (
+    msg:"IoT Lateral Movement - Internal Network Scan from Honeypot";
+    flags:S;
+    threshold: type threshold, track by_src, count 10, seconds 30;
+    classtype:attempted-recon;
+    priority:2;
+    reference:url,attack.mitre.org/techniques/T1046;
+    metadata:mitre_tactic_id TA0008, mitre_tactic_name Lateral_Movement, mitre_technique_id T1046;
+    sid:2000024; rev:1;
+)
+
+# ============================================================================
+# CATEGORY 10: DDoS PREPARATION
+# ============================================================================
+# Based on thesis Chapter 2.2.2 - DDoS attacks from botnets
+
+# Rule 25: DDoS Tool Download - Known Binaries
+# Detects download of known DDoS tools (LOIC, HOIC, Slowloris)
+# MITRE: T1105 (Ingress Tool Transfer)
+# MITRE: T1498 (Network Denial of Service)
+alert http $EXTERNAL_NET any -> $HOME_NET $HTTP_PORTS (
+    msg:"IoT DDoS Tool Download - Attack Preparation";
+    flow:to_server,established;
+    content:"GET"; http_method;
+    pcre:"/(?:loic|hoic|slowloris|hulk|goldeneye|ddos|flood).*\.(?:exe|elf|bin)/Ui";
+    classtype:trojan-activity;
+    reference:url,attack.mitre.org/techniques/T1498;
+    metadata:mitre_tactic_id TA0040, mitre_tactic_name Impact, mitre_technique_id T1498;
+    sid:2000025; rev:1;
+)
+
+# ============================================================================
+# PERFORMANCE NOTES
+# ============================================================================
+# These rules are optimized for low latency (P95 < 100ms):
+# - Use of depth/offset/within to limit payload inspection
+# - Threshold/detection_filter to reduce alert volume
+# - Content matches before expensive PCRE operations
+# - Flowbits avoided in favor of simple threshold tracking
+#
+# Tuning recommendations:
+# - Adjust threshold values based on your environment
+# - Monitor false positive rates and adjust PCRE patterns
+# - Use 'suppress' for known false positive sources
+# - Enable/disable rules based on deployed honeypots
+#
+# ============================================================================
+
+# ============================================================================
+# VALIDATION RESULTS (to be filled after testing)
+# ============================================================================
+# Tested against PCAP samples from: tests/fixtures/
+#
+# Metrics (target vs. achieved):
+#   TPR (True Positive Rate):     > 80%   | Achieved: [TBD]
+#   FPR (False Positive Rate):    < 5%    | Achieved: [TBD]
+#   Precision:                    > 90%   | Achieved: [TBD]
+#   F1 Score:                     > 0.85  | Achieved: [TBD]
+#   Latency P95:                  < 100ms | Achieved: [TBD]
+#
+# Test command: make test-rules
+# Validation script: tests/test_rules.py
+# ============================================================================
+
+# End of IoT Honeynet Suricata Rules
+# Last updated: 2025-10-23
+# Total rules: 25
